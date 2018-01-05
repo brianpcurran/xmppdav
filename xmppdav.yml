@@ -1,0 +1,194 @@
+---
+- hosts: xmppdav
+  sudo: yes
+  tasks:
+  - name: Add Prosody APT repository
+    apt_repository:
+      repo: 'deb http://packages.prosody.im/debian jessie main'
+      state: present
+  - name: Add key for Prosody APT repository
+    apt_key:
+      url: https://prosody.im/files/prosody-debian-packages.key
+      state: present
+  - name: Install Prosody
+    apt:
+      name: prosody
+      #update_cache: yes
+      state: present
+    register: install_prosody
+  - name: Stop Prosody service
+    service:
+      name: prosody
+      state: stopped
+    when: install_prosody.changed
+  - name: Install lua-dbi-postgresql
+    apt:
+      name: lua-dbi-postgresql
+      state: present
+  - name: Sync mod_auth_psql_hashed.lua to template
+    template:
+      dest: /usr/lib/prosody/modules/mod_auth_psql_hashed.lua
+      src: ./templates/mod_auth_psql_hashed.lua.j2
+      owner: root
+      group: root
+      mode: 0644
+  - name: Install postgresql
+    apt:
+      name: postgresql
+      state: present
+  - name: Install postgresql-contrib
+    apt:
+      name: postgresql-contrib
+      state: present
+  - name: Sync pg_hba.conf to template
+    template:
+      dest: /etc/postgresql/9.4/main/pg_hba.conf
+      src: ./templates/pg_hba.conf.j2
+      owner: postgres
+      group: postgres
+      mode: 0640
+    register: new_pg_hba_conf
+  - name: Install python-psycopg2
+    apt:
+      name: python-psycopg2
+      state: present
+    register: psycopg2_installed
+  - name: Restart postgresql service
+    service:
+      name: postgresql
+      state: restarted
+    when: new_pg_hba_conf.changed or psycopg2_installed.changed
+  - name: Create "xmppdav" postgresql database
+    postgresql_db:
+      login_user: postgres
+      login_host: 127.0.0.1
+      name: xmppdav
+    register: database_creation
+  - name: Enable pgcrypto module on database
+    command: sudo -u postgres psql -h 127.0.0.1 -d xmppdav -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+    when: database_creation.changed
+  - name: Create "accounts" postgresql table
+    command: sudo -u postgres psql -h 127.0.0.1 -d xmppdav -c "CREATE TABLE IF NOT EXISTS accounts (localpart varchar(255), domainpart varchar(255), password varchar(255));"
+    when: database_creation.changed
+  - name: Grant "prosody" user INSERT, UPDATE, and SELECT permissions on "accounts" table
+    postgresql_user:
+      db: xmppdav
+      encrypted: yes
+      login_user: postgres
+      login_host: 127.0.0.1
+      name: prosody
+      password: "{{ db_password_prosody }}"
+      priv: accounts:INSERT,UPDATE,SELECT
+  - name: Sync prosody.cfg.lua to template
+    template:
+      dest: /etc/prosody/prosody.cfg.lua
+      src: ./templates/prosody.cfg.lua.j2
+      owner: root
+      group: root
+      mode: 750
+    register: prosody_cfg_lua
+  - name: Check for existing certificate
+    stat:
+      path: "{{ xmpp_certificate }}"
+    register: existing_certificate
+  - name: Check for existing private key
+    stat:
+      path: "{{ xmpp_key }}"
+    register: existing_key
+  - name: Generate a self-signed certificate for Prosody
+    command: openssl req -new -x509 -days 1095 -nodes -out "/etc/prosody/certs/selfsigned.crt" -newkey rsa:2048 -keyout "/etc/prosody/certs/selfsigned.key" -subj "/C={{ cert_country }}/ST={{ cert_state }}/L={{ cert_city }}/O={{ cert_ou }}/CN={{ xmpp_domain }}"
+    when: existing_certificate.stat.exists == false or existing_key.stat.exists == false
+    register: new_certificate
+  - name: Restart Prosody
+    service:
+      name: prosody
+      state: restarted
+    when: prosody_cfg_lua.changed or new_certificate.changed
+  - name: Enable Prosody on startup
+    service:
+      name: prosody
+      enabled: yes
+  - name: Create radicale user
+    user:
+      home: /var/lib/radicale
+      shell: /bin/false
+      name: radicale
+      groups: prosody
+  - name: Install pip
+    apt:
+      name: python-pip
+      state: present
+  - name: Install radicale
+    pip:
+      name: radicale
+      state: present
+  - name: Sync radicale service file to template
+    template:
+      dest: /etc/systemd/system/radicale.service
+      src: ./templates/radicale-service.j2
+      owner: root
+      group: root
+      mode: 0755
+  - name: Create /etc/radicale
+    file:
+      state: directory
+      path: /etc/radicale
+      owner: root
+      group: root
+      mode: 0755
+  - name: Sync radicale config to template
+    template:
+      dest: /etc/radicale/config
+      src: ./templates/radicale-config.j2
+      owner: root
+      group: root
+      mode: 0644
+    register: radicale_config
+  - name: Sync radicale logging to template
+    template:
+      dest: /etc/radicale/logging
+      src: ./templates/radicale-logging.j2
+      owner: root
+      group: root
+      mode: 0644
+    register: radicale_logging
+  - name: Create radicale log directory
+    file:
+      state: directory
+      path: /var/log/radicale
+      owner: radicale
+      group: radicale
+      mode: 0640
+  - name: Grant "radicale" user SELECT permissions on "accounts" table
+    postgresql_user:
+      db: xmppdav
+      encrypted: yes
+      login_user: postgres
+      login_host: 127.0.0.1
+      name: radicale
+      password: "{{ db_password_radicale }}"
+      priv: accounts:SELECT
+  - name: Sync psql.py to template
+    template:
+      dest: /usr/local/lib/python2.7/dist-packages/radicale/auth/psql.py
+      src: ./templates/psql.py.j2
+      owner: root
+      group: staff
+      mode: 0644
+    register: radicale_psql
+  - name: Restart radicale
+    service:
+      name: radicale
+      state: started
+    when: radicale_config.changed or radicale_logging.changed or radicale_psql.changed
+  - name: Enable Radicale on startup
+    service:
+      name: radicale
+      enabled: yes
+  - name: Sync user management script to template
+    template:
+      dest: /root/usermgmt.sh
+      src: ./templates/usermgmt.sh.j2
+      owner: root
+      group: root
+      mode: 0744

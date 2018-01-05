@@ -1,0 +1,44 @@
+modules_enabled = {
+  "roster";
+  "saslauth";
+  "tls";
+  "posix";
+  "ping";
+  "pep";
+  "dialback";
+  "disco";
+  "posix";
+  "private";
+  "vcard";
+}
+
+ssl = {
+  key = "{{ xmpp_key}}";
+  certificate = "{{ xmpp_certificate }}";
+}
+
+log = {
+  info = "/var/log/prosody/prosody.log";
+  error = "/var/log/prosody/prosody.err";
+}
+
+c2s_require_encryption = true
+
+pidfile = "/var/run/prosody/prosody.pid"
+
+authentication = "psql_hashed"
+
+sql = {
+  driver = "PostgreSQL";
+  database = "xmppdav";
+  username = "prosody";
+  password = "{{ db_password_prosody }}";
+  host = "127.0.0.1";
+}
+
+psql_users_table = "accounts"
+psql_localpart_column = "localpart"
+psql_domainpart_column = "domainpart"
+psql_password_column = "password"
+
+VirtualHost "{{ xmpp_domain }}"

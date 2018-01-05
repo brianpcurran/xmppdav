@@ -1,0 +1,40 @@
+usage() {
+  printf "usermgmt list [USER]|add USER|delete USER|change USER\n"
+  exit 1
+}
+
+action="$1"
+database_name="xmppdav"
+domainpart="{{ xmpp_domain }}"
+
+if [ ! -z "$3" ]; then
+  usage
+  exit 1
+fi
+
+set -f
+
+if [ "$action" = "list" ]; then
+  if [ ! -z "$2" ]; then
+    psql_cmd="SELECT * FROM accounts WHERE localpart='"$2"';"
+  else
+    psql_cmd="SELECT * FROM accounts;"
+  fi
+elif [ "$action" = "add" ]; then
+  read -p "password (will echo): " xmpp_password
+  printf "Adding "$2"@"$domainpart"...\n"
+  psql_cmd="INSERT INTO accounts (localpart, domainpart, password) VALUES ('"$2"', '"$domainpart"', crypt('"$xmpp_password"', gen_salt('bf')));"
+elif [ "$action" = "delete" ]; then
+  printf "Deleting "$localpart"@"$domainprat"...\n"
+  psql_cmd="DELETE FROM accounts WHERE localpart='"$2"' AND domainpart='"$domainpart"';"
+elif [ "$action" = "change" ]; then
+  read -p "New password (will echo): " xmpp_password
+  psql_cmd="UPDATE accounts SET password = crypt('"$xmpp_password"', gen_salt('bf')) WHERE localpart='"$2"' AND domainpart='"$domainpart"';"
+else
+  usage
+  exit 1
+fi
+
+su -c "psql -h 127.0.0.1 -c \"$psql_cmd\" \"$database_name\"" postgres;
+
+set +f

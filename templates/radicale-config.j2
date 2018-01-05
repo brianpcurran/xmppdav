@@ -1,0 +1,28 @@
+[server]
+hosts = 0.0.0.0:5232
+daemon = true
+ssl = True
+certificate = /etc/prosody/certs/legends.im.crt
+key = /etc/prosody/certs/legends.im.key
+dns_lookup = False
+
+[auth]
+type = psql
+psql_server = 127.0.0.1
+psql_db_name = xmppdav
+psql_db_user = radicale
+psql_db_password = {{ db_password_radicale }}
+psql_users_table = accounts
+psql_username_column = localpart
+psql_password_column = password
+
+[rights]
+type = owner_only
+
+[storage]
+type = filesystem
+filesystem_folder = /var/lib/radicale/collections
+
+[logging]
+config = /etc/radicale/logging
+debug = False
